@@ -196,6 +196,7 @@ oc create secret generic my-github-key \
    "disable-trust-manager": true,
    "allow-any-hostname": true,
    ```
+   これは検証環境の自己書名証明書を使えるようにするためのもので、本番環境では設定しない。
 4. 自分のGitリポジトリに入れてpush
    ```
    git add src/main/webapp/WEB-INF/keycloak.json
@@ -251,4 +252,14 @@ oc delete all -l application=myapp
 # Routeの確認 ("https://"を付けてブラウザでアクセス)
 oc get route
 ```
+
+## 開発時の認証の無効化
+
+ローカルマシン上で開発する際は、検証用のKeycloakを別に用意したり、毎回ログイン画面を経由してアクセスしたりと、認証は煩わしいだけの事が多い。
+
+src/main/webapp/WEB-INF/ の web.xml と keycloak.json を削除するだけで認証は無効になる。
+
+これらのファイルのみを持たないブランチを作るなどして開発プロセスを工夫できる。
+
+また、OpenShift上で動かすための専用のブランチを用意し、`oc new-app` 時に `SOURCE_REPOSITORY_REF=<ブランチ名>` のようにパラメタでブランチ指定する方法もある。
 
