@@ -52,14 +52,10 @@ else
     /subsystem=elytron/http-authentication-factory=keycloak-http-authentication:list-add(name=mechanism-configurations, value={mechanism-name=KEYCLOAK,mechanism-realm-configurations=[{realm-name=KeycloakOIDCRealm,realm-mapper=keycloak-oidc-realm-mapper}]})
 end-if
 
-if (outcome != success) of /subsystem=undertow/application-security-domain=other:read-resource
-    /subsystem=undertow/application-security-domain=other:add(http-authentication-factory=keycloak-http-authentication)
-else
-    echo Undertow already configured with Keycloak
-end-if
+echo Undertow to configure with Keycloak
+/subsystem=undertow/application-security-domain=other:remove()
+/subsystem=undertow/application-security-domain=other:add(http-authentication-factory=keycloak-http-authentication)
 
-if (outcome != success) of /subsystem=ejb3/application-security-domain=other:read-resource
-    /subsystem=ejb3/application-security-domain=other:add(security-domain=KeycloakDomain)
-else
-    echo EJB already configured with Keycloak
-end-if
+echo EJB to configure with Keycloak
+/subsystem=ejb3/application-security-domain=other:write-attribute(name=security-domain,value=KeycloakDomain)
+

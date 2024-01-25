@@ -2,7 +2,9 @@
   "realm": "test-realm",
   "auth-server-url": "https://keycloak-rhbk.apps.ocp4.jpi.openshift.local/",
   "ssl-required": "external",
-  "resource": "myapp-onagano-db2",
+  "disable-trust-manager": true,
+  "allow-any-hostname": true,
+  "resource": "myapp-onagano",
   "public-client": true,
   "confidential-port": 0
 }

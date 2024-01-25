@@ -9,8 +9,7 @@ headingDivider: 2
 [GitHubのonagano-rh/kitchensink-jsp-db2](https://github.com/onagano-rh/kitchensink-jsp-db2) について：
 
 - [EAP 7.4のQuickstarts](https://github.com/jboss-developer/jboss-eap-quickstarts/tree/7.4.x) の kitchensink-jsp にS2Iの仕組みでDB2 (AS400版) のドライバを仕込んである
-- eap74-sso-s2i のTemplateを使用してKeycloakでアプリを保護
-  - このTemplateはPassthrough TLSのRouteを使用しているため [RH-SSOの同様のドキュメント](https://access.redhat.com/documentation/en-us/red_hat_single_sign-on/7.6/html-single/red_hat_single_sign-on_for_openshift/index#deploying_passthrough_tls_termination_templates) が参考になる
+- EAP組込みの OpenID Connect (OIDC) クライアントの機能を有効化してKeycloakでアプリを保護
 
 ソースの編集も行う者は各自フォークして使うのがよい。その際リポジトリ名は自分のものに読み替えること。
 
@@ -135,8 +134,6 @@ masterレルムのユーザadminでの最後の作業として、実際に使用
 
 # Keycloakで保護された本プロジェクトのビルドとデプロイ
 
-__WORK IN PROGRESS__
-
 以降の作業はOpenShiftの通常ユーザの権限で行う。
 
 ## プロジェクトの作成
@@ -165,13 +162,7 @@ oc apply -f https://raw.githubusercontent.com/jboss-container-images/jboss-eap-o
 # Templateのインポート
 for resource in eap74-amq-persistent-s2i.json eap74-amq-s2i.json eap74-basic-s2i.json eap74-https-s2i.json eap74-sso-s2i.json ; \
   do oc apply -f https://raw.githubusercontent.com/jboss-container-images/jboss-eap-openshift-templates/eap74/templates/${resource}; done
-
-# RH-SSOのImageStreamのインポート
-oc import-image sso76-openshift-rhel8 --from=registry.redhat.io/rh-sso-7/sso76-openshift-rhel8 --confirm --request-timeout=5m
 ```
-
-特に eap74-sso-s2i のTemplateを今回は使用する。
-このTemplateがOpenID Connectのライブラリを取得するためのイメージであるRH-SSOのImageStreamも合わせてインポートしている。
 
 ## ソースコード取得用のSecretの作成
 
@@ -183,47 +174,34 @@ oc create secret generic my-github-key \
   --from-file=ssh-privatekey=${HOME}/.ssh/id_rsa --type=kubernetes.io/ssh-auth
 ```
 
-## Passthroug TLS の設定
+## Keycloakに自分のアプリをクライアント登録する
 
-```shell
-# Passthroug TLS setting documentation:
-# https://access.redhat.com/documentation/en-us/red_hat_single_sign-on/7.6/html-single/red_hat_single_sign-on_for_openshift/index#deploying_passthrough_tls_termination_templates
+先にrhbkプロジェクトに作成したKeycloakの管理コンソールにブラウザでアクセスする。test-realm専用のものを使うのが望ましい。
 
-oc policy add-role-to-user view system:serviceaccount:$(oc project -q):default
+1. "Clients > Create client" をクリック
+2. "Client ID: myapp-<自分のアカウント名>" を入力しNextをクリック
+   このIDはレルム内で一意であれば何でもよい。
+3. 次の画面はデフォルトのままNextをクリック
+4. 以下の内容で入力しNextをSaveをクリック
+   "Root URL: https://<自分のアプリのRoute>"
+   "Valid redirect URIs: /*"
+   "Valid post logout redirect URIs: /*"
 
-# Install `openssl` first by `apt install openssl`
-# Remember password for "Enter PEM pass phrase: " prompt
-openssl req -new -newkey rsa:4096 -x509 -keyout xpaas.key -out xpaas.crt -days 365 -subj "/CN=xpaas-sso-demo.ca"
+## keycloak.jsonを取得し src/main/webapp/WEB-INF/ に配置する
 
-keytool -genkeypair -keyalg RSA -keysize 2048 -dname "CN=secure-myapp-$(oc project -q).apps.${CLUSTER_NAME}" -alias jboss -keystore keystore.jks -storepass mykeystorepass
-
-keytool -certreq -keyalg rsa -alias jboss -keystore keystore.jks -file sso.csr -storepass mykeystorepass
-
-# Provide the same password as "PEM pass phrase"
-openssl x509 -req -extfile  <(printf "subjectAltName=DNS:secure-myapp-$(oc project -q).apps.${CLUSTER_NAME}") -CA xpaas.crt -CAkey xpaas.key -in sso.csr -out sso.crt -days 365 -CAcreateserial
-
-# Type "yes" to the prompt
-keytool -import -file xpaas.crt -alias xpaas.ca -keystore keystore.jks -storepass mykeystorepass
-
-keytool -import -file sso.crt -alias jboss -keystore keystore.jks -storepass mykeystorepass
-
-keytool -genseckey -alias secret-key -storetype JCEKS -keystore jgroups.jceks -keyalg Blowfish -keysize 56 -storepass password
-
-# Type "yes" to the prompt
-keytool -import -file xpaas.crt -alias xpaas.ca -keystore truststore.jks -storepass mykeystorepass
-
-oc create secret generic eap7-app-secret --from-file=keystore.jks --from-file=jgroups.jceks --from-file=truststore.jks
-
-oc secrets link default eap7-app-secret
-```
-
-## データソース作成用のConfigMapの作成
-
-今回使用するTemplateのeap74-sso-s2iでは自動ではextensionsディレクトリをマウントしてくれないため、`oc new-app`直後に自分で`oc set volume`コマンドでマウントすることになる。その際に使用するConfigMapを事前に作成しておく。
-
-```shell
-oc create configmap jboss-cli --from-file=postconfigure.sh=extensions/postconfigure.sh --from-file=config-database.cli=extensions/config-database.cli
-```
+1. 右上のActionドロップダウンリストをクリックし "Download adapter config" を選択
+2. デフォルトの "Keycloak OIDC JSON" のままDownloadをクリック
+3. エディタで開いて以下の二行を追加
+   ```
+   "disable-trust-manager": true,
+   "allow-any-hostname": true,
+   ```
+4. 自分のGitリポジトリに入れてpush
+   ```
+   git add src/main/webapp/WEB-INF/keycloak.json
+   git commit -m "add my keycloak.json"
+   git push
+   ```
 
 ## アプリのビルドとデプロイ
 
@@ -231,39 +209,19 @@ oc create configmap jboss-cli --from-file=postconfigure.sh=extensions/postconfig
 # コードの変更をいずれ行うつもりなら自分用にForkしてそれを使うこと
 MY_GITHUB_REPOSITORY=onagano-rh/kitchensink-jsp-db2
 
-oc new-app --template=eap74-sso-s2i \
+oc new-app --template=eap74-basic-s2i \
   -p APPLICATION_NAME=myapp  \
   -p IMAGE_STREAM_NAMESPACE=$(oc project -q) \
   -p EAP_IMAGE_NAME=jboss-eap74-openjdk17-openshift:latest \
   -p EAP_RUNTIME_IMAGE_NAME=jboss-eap74-openjdk17-runtime-openshift:latest \
-  -p SSO_IMAGE_NAME=sso76-openshift-rhel8:latest \
   -p SOURCE_REPOSITORY_URL=git@github.com:${MY_GITHUB_REPOSITORY}.git \
   -p SOURCE_REPOSITORY_REF=main \
   -p CONTEXT_DIR="" \
   --source-secret=my-github-key \
-  -p ARTIFACT_DIR=target \
-  -p HOSTNAME_HTTPS="secure-myapp-$(oc project -q).apps.${CLUSTER_NAME}" \
-  -p HTTPS_SECRET=eap7-app-secret -p HTTPS_KEYSTORE=keystore.jks -p HTTPS_NAME=jboss -p HTTPS_PASSWORD=mykeystorepass \
-  -p JGROUPS_ENCRYPT_SECRET=eap7-app-secret -p JGROUPS_ENCRYPT_KEYSTORE=jgroups.jceks -p JGROUPS_ENCRYPT_NAME=secret-key -p JGROUPS_ENCRYPT_PASSWORD=password \
-  -p SSO_TRUSTSTORE_SECRET=eap7-app-secret -p SSO_TRUSTSTORE=truststore.jks -p SSO_TRUSTSTORE_PASSWORD=mykeystorepass \
-  -p SSO_URL="https://keycloak-rhbk.apps.${CLUSTER_NAME}" \
-  -p SSO_SERVICE_URL="https://keycloak-rhbk.apps.${CLUSTER_NAME}" \
-  -p SSO_DISABLE_SSL_CERTIFICATE_VALIDATION="true" \
-  -p SSO_REALM="test-realm" \
-  -p SSO_USERNAME="admin" \
-  -p SSO_PASSWORD="password" \
-  -p SSO_ENABLE_CORS="true" \
-  -e ENABLE_ACCESS_LOG="true" \
-  -e DISABLE_EMBEDDED_JMS_BROKER="true" \
-  -e SSO_FORCE_LEGACY_SECURITY="false" \
   -e MYDB_USERNAME=XXXX \
   -e MYDB_PASSWORD=XXXX \
   -e MYDB_DATABASE=XXXX \
-  -e MYDB_SERVER=XXXX \
-  -e MYDB_PORT=not-used-by-db2
-
-# データソース作成用スクリプトをマウント
-oc set volume dc/myapp --add --name=jboss-cli -m /opt/eap/extensions -t configmap --configmap-name=jboss-cli --default-mode='0755' --overwrite
+  -e MYDB_SERVER=XXXX
 ```
 
 `MYDB_` で始まる変数の "XXXX" は用意されたDB2の接続情報に合わせる。
@@ -285,6 +243,9 @@ oc delete all -l application=myapp
 ```
 
 ## 動作確認
+
+ブラウザで自分のアプリにアクセスするとtest-realmのログイン画面が出てくることを確認する。
+また、あらかじめtest-realmに登録しておいたユーザでログインできることも確認する。
 
 ```shell
 # Routeの確認 ("https://"を付けてブラウザでアクセス)
